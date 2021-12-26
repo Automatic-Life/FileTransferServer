@@ -34,11 +34,38 @@ void writeToFile(std::ofstream& file, std::vector<char*>& container, std::uint32
 	}
 }
 
+void excludeSocket(std::vector<SOCKET*>& openSockets, SOCKET* soc) 
+{
+	for (auto in : openSockets)
+	{
+		if (in == soc) {in = nullptr;}
+	}
+}
+
+void exitProgramm(std::vector<SOCKET*>& openSockets, std::vector<ADDRINFO*> openAddrInfo)
+{	
+	for (auto in : openSockets)
+	{
+		if (in == nullptr) {continue;}
+		closesocket(*in);
+	}
+	for (auto in : openAddrInfo)
+	{
+		if (in == nullptr) {continue;}
+		freeaddrinfo(in);
+	}
+	WSACleanup();
+	exit(1);
+}
+
 int main(int argc, char* argv[])
 {
 	const char* IP = argv[1];
 	const char* connectionPort = argv[2];
 	const std::string downloadDirectory = argv[3];
+
+	std::vector<SOCKET*> openSockets;
+	std::vector<ADDRINFO*> openAddrInfo;
 	
 	WSADATA wsaData;
 	int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -58,60 +85,45 @@ int main(int argc, char* argv[])
 	if (iResult)
 	{
 		std::cout << "getaddrinfo() failed with error " << iResult;
-		WSACleanup();
-		exit(1);
+		exitProgramm(openSockets, openAddrInfo);
 	}
+	openAddrInfo.push_back(addrResult);
 
 	SOCKET listenSocket = INVALID_SOCKET;
 	listenSocket = socket(addrResult->ai_family, addrResult->ai_socktype, addrResult->ai_protocol);
 	if (listenSocket == INVALID_SOCKET)
 	{
 		std::cout << "Socket creation failed";
-		freeaddrinfo(addrResult);
-		WSACleanup();
-		exit(1);
+		exitProgramm(openSockets, openAddrInfo);
 	}
+	openSockets.push_back(&listenSocket);
 
 	iResult = bind(listenSocket, addrResult->ai_addr, (int)addrResult->ai_addrlen);
 	if (iResult == SOCKET_ERROR)
 	{
 		std::cout << "Binding socket failed\n";
-		iResult = closesocket(listenSocket);
-		if (iResult == SOCKET_ERROR)
-		{
-			std::cout << "Close socket failed\n";
-		}
-		freeaddrinfo(addrResult);
-		WSACleanup();
-		exit(1);
+		exitProgramm(openSockets, openAddrInfo);
 	}
 
 	iResult = listen(listenSocket, SOMAXCONN);
 	if (iResult == SOCKET_ERROR)
 	{
 		std::cout << "Listening failed\n";
-		iResult = closesocket(listenSocket);
-		if (iResult == SOCKET_ERROR)
-		{
-			std::cout << "Close socket failed\n";
-		}
-		freeaddrinfo(addrResult);
-		WSACleanup();
-		exit(1);
+		exitProgramm(openSockets, openAddrInfo);
 	}
 	
 	SOCKET socketTCP = INVALID_SOCKET;
 	socketTCP = accept(listenSocket, NULL, NULL);
 	if (socketTCP == INVALID_SOCKET)
 	{
-		std::cout << "Accept failed\n";
-		closesocket(listenSocket);
-		freeaddrinfo(addrResult);
-		WSACleanup();
-		exit(1);
+		std::cout << "Creating TCP connection failed\n";
+		exitProgramm(openSockets, openAddrInfo);
 	}
+	openSockets.push_back(&socketTCP);
 
+	excludeSocket(openSockets, &listenSocket);
 	closesocket(listenSocket);
+
 	std::cout << "Client connected\n";
 
 	// Recieving filename and UDP port
@@ -136,9 +148,9 @@ int main(int argc, char* argv[])
 	if (iResult)
 	{
 		std::cout << "getaddrinfo() failed with error " << iResult;
-		WSACleanup();
-		exit(1);
+		exitProgramm(openSockets, openAddrInfo);
 	}
+	openAddrInfo.push_back(addrResultUDP);
 
 	SOCKADDR_STORAGE their_addr;
 	socklen_t addr_len;
@@ -148,24 +160,16 @@ int main(int argc, char* argv[])
 	socketUDP = socket(addrResultUDP->ai_family, addrResultUDP->ai_socktype, addrResultUDP->ai_protocol);
 	if (socketUDP == INVALID_SOCKET)
 	{
-		std::cout << "Socket creation failed";
-		closesocket(socketTCP);
-		closesocket(listenSocket);
-		freeaddrinfo(addrResultUDP);
-		WSACleanup();
-		exit(1);
+		std::cout << "Socket UDP creation failed";
+		exitProgramm(openSockets, openAddrInfo);
 	}
+	openSockets.push_back(&socketUDP);
 
 	iResult = bind(socketUDP, addrResultUDP->ai_addr, (int)addrResultUDP->ai_addrlen);
 	if (iResult == SOCKET_ERROR)
 	{
 		std::cout << "Binding socket failed\n";
-		closesocket(socketTCP);
-		closesocket(socketUDP);
-		closesocket(listenSocket);
-		freeaddrinfo(addrResultUDP);
-		WSACleanup();
-		exit(1);
+		exitProgramm(openSockets, openAddrInfo);
 	}
 
 	// Recieving filesize

@@ -1,4 +1,4 @@
 Server.vcxproj.filters
 Server.vcxproj.user
-x64
-.vs
+x64/
+.vs/

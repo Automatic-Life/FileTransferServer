@@ -5,6 +5,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <list>
 #include <vector>
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -34,19 +35,16 @@ void writeToFile(std::ofstream& file, std::vector<char*>& container, std::uint32
 	}
 }
 
-void excludeSocket(std::vector<SOCKET*>& openSockets, SOCKET* soc) 
+void excludeSocket(std::list<SOCKET*>& openSockets, SOCKET* soc) 
 {
-	for (auto& in : openSockets)
-	{
-		if (in == soc) {in = nullptr;}
-	}
+	closesocket(*soc);
+	openSockets.remove(soc);
 }
 
-void exitProgramm(std::vector<SOCKET*>& openSockets, std::vector<ADDRINFO*> openAddrInfo)
+void exitProgramm(std::list<SOCKET*>& openSockets, std::vector<ADDRINFO*> openAddrInfo)
 {	
 	for (auto& in : openSockets)
 	{
-		if (in == nullptr) {continue;}
 		closesocket(*in);
 	}
 	for (auto& in : openAddrInfo)
@@ -64,7 +62,7 @@ int main(int argc, char* argv[])
 	const char* connectionPort = argv[2];
 	const std::string downloadDirectory = argv[3];
 
-	std::vector<SOCKET*> openSockets;
+	std::list<SOCKET*> openSockets;
 	std::vector<ADDRINFO*> openAddrInfo;
 	
 	WSADATA wsaData;
@@ -122,7 +120,6 @@ int main(int argc, char* argv[])
 	openSockets.push_back(&socketTCP);
 
 	excludeSocket(openSockets, &listenSocket);
-	closesocket(listenSocket);
 
 	std::cout << "Client connected\n";
 

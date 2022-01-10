@@ -13,6 +13,18 @@
 std::uint32_t datagrammSize = 65500; 
 const int datagrammIDSize = 2;
 
+struct RecieveInfo
+{
+	SOCKET* socketTCP = nullptr;
+	SOCKET* socketUDP = nullptr;
+	SOCKADDR_STORAGE* their_addr = nullptr;
+	socklen_t* addr_len = nullptr;
+	std::uint32_t countOfDatagramms = 0;
+	std::uint32_t recieveDataSize = 0;
+	std::uint32_t datagrammExpecID = 0;
+	
+};
+
 std::uint32_t getIDfromDatagramm(char* buf, int datagrammDataSize)
 {
 	std::uint32_t result = 0;
@@ -27,7 +39,8 @@ std::uint32_t getIDfromDatagramm(char* buf, int datagrammDataSize)
 	return result;
 }
 
-void writeToFile(std::ofstream& file, std::vector<char*>& container, std::uint32_t datagrammDataSize, std::uint32_t start, std::uint32_t end)
+void writeToFile(std::ofstream& file, std::vector<char*>& container, std::uint32_t datagrammDataSize,
+	std::uint32_t start, std::uint32_t end)
 {
 	for (std::uint32_t i = start; i < end; ++i)
 	{
@@ -35,13 +48,42 @@ void writeToFile(std::ofstream& file, std::vector<char*>& container, std::uint32
 	}
 }
 
+std::uint32_t reciveDatagramms(std::vector<char*>& datagramms, RecieveInfo* info)
+{
+	char* buf = nullptr;
+	std::uint32_t datagrammID = 0;
+	bool ACK = true;
+
+	for (std::uint32_t i = 0; i < info->countOfDatagramms; ++i)
+	{
+		buf = new char[info->recieveDataSize + datagrammIDSize];
+
+		do
+		{
+			recvfrom(*(info->socketUDP), buf, info->recieveDataSize + datagrammIDSize, NULL, (SOCKADDR*)info->their_addr, info->addr_len);
+			datagrammID = getIDfromDatagramm(buf, info->recieveDataSize);
+
+		} while (datagrammID != info->datagrammExpecID);
+		
+		++(info->datagrammExpecID);
+
+		datagramms.push_back(buf);
+		send(*(info->socketTCP), (char*)&ACK, sizeof(ACK), NULL);
+
+	}
+	buf = nullptr;
+
+	return info->datagrammExpecID;
+}
+
+
 void excludeSocket(std::list<SOCKET*>& openSockets, SOCKET* soc) 
 {
 	closesocket(*soc);
 	openSockets.remove(soc);
 }
 
-void exitProgramm(std::list<SOCKET*>& openSockets, std::vector<ADDRINFO*> openAddrInfo)
+void exitProgramm(std::list<SOCKET*>& openSockets, std::list<ADDRINFO*> openAddrInfo)
 {	
 	for (auto& in : openSockets)
 	{
@@ -49,7 +91,6 @@ void exitProgramm(std::list<SOCKET*>& openSockets, std::vector<ADDRINFO*> openAd
 	}
 	for (auto& in : openAddrInfo)
 	{
-		if (in == nullptr) {continue;}
 		freeaddrinfo(in);
 	}
 	WSACleanup();
@@ -63,7 +104,7 @@ int main(int argc, char* argv[])
 	const std::string downloadDirectory = argv[3];
 
 	std::list<SOCKET*> openSockets;
-	std::vector<ADDRINFO*> openAddrInfo;
+	std::list<ADDRINFO*> openAddrInfo;
 	
 	WSADATA wsaData;
 	int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -186,60 +227,36 @@ int main(int argc, char* argv[])
 	std::uint32_t countOfEqualFragments = fileSize / datagrammSize;
 	std::uint32_t sizeOfModulo = fileSize % datagrammSize;
 	std::vector<char*> datagramms;
-	char* buf = nullptr;
-	std::uint32_t datagrammID = 0;
-	bool ACK = true;
-	
+
+	std::uint32_t id = 0;
+
+	RecieveInfo recieveInfo;
+	recieveInfo.socketTCP = &socketTCP;
+	recieveInfo.socketUDP = &socketUDP;
+	recieveInfo.their_addr = &their_addr;
+	recieveInfo.addr_len = &addr_len;
+		
 	if (fileSize >= datagrammSize)
 	{
-		for (std::uint32_t i = 0; i < countOfEqualFragments; ++i)
-		{
-
-			buf = new char[datagrammSize + datagrammIDSize];
-
-			do
-			{
-				//std::cout << "sending request to " << i << "\n";
-				recvfrom(socketUDP, buf, datagrammSize + datagrammIDSize, NULL, (SOCKADDR*)&their_addr, &addr_len);
-				datagrammID = getIDfromDatagramm(buf, datagrammSize);
-				//if (i == datagrammID) { std::cout << "CORRECT GET" << i << "\n"; }
-				//else { std::cout << "WRONG GE????? " << i << "\n"; }
-
-			} while (i != datagrammID);
-
-			datagramms.push_back(buf);
-			send(socketTCP, (char*)&ACK, sizeof(ACK), NULL);
-		}
-		buf = nullptr;
-
+		recieveInfo.countOfDatagramms = countOfEqualFragments;
+		recieveInfo.recieveDataSize = datagrammSize;
+		recieveInfo.datagrammExpecID = 0;
+		id = reciveDatagramms(datagramms, &recieveInfo);
+			
 		if (sizeOfModulo)
 		{
-			++datagrammID;
-			buf = new char[sizeOfModulo + datagrammIDSize];
-			std::uint32_t datagrammModuloID = 0;
-			do
-			{
-				recvfrom(socketUDP, buf, sizeOfModulo + datagrammIDSize, NULL, (SOCKADDR*)&their_addr, &addr_len);
-				datagrammModuloID = getIDfromDatagramm(buf, sizeOfModulo);
-			} while (datagrammModuloID != datagrammID);
-
-			datagramms.push_back(buf);
-			buf = nullptr;
-			send(socketTCP, (char*)&ACK, sizeof(ACK), NULL);
+			recieveInfo.countOfDatagramms = 1;
+			recieveInfo.recieveDataSize = sizeOfModulo;
+			recieveInfo.datagrammExpecID = id;
+			reciveDatagramms(datagramms, &recieveInfo);
 		}
 	}
 	else
 	{
-		buf = new char[fileSize + datagrammIDSize];
-		do
-		{
-			recvfrom(socketUDP, buf, fileSize + datagrammIDSize, NULL, (SOCKADDR*)&their_addr, &addr_len);
-			datagrammID = getIDfromDatagramm(buf, fileSize);
-			
-		} while (datagrammID != 0);
-		datagramms.push_back(buf);
-		buf = nullptr;
-		send(socketTCP, (char*)&ACK, sizeof(ACK), NULL);
+		recieveInfo.countOfDatagramms = 1;
+		recieveInfo.recieveDataSize = fileSize;
+		recieveInfo.datagrammExpecID = 0;
+		reciveDatagramms(datagramms, &recieveInfo);
 	}	
 	
 	bool transmissionFileSuccess = false;
@@ -278,8 +295,8 @@ int main(int argc, char* argv[])
 	delete[] transmissionFileName, UDPPort;
 	transmissionFileName = nullptr; UDPPort = nullptr;
 	
-	closesocket(socketUDP);
-	closesocket(socketTCP);
+	excludeSocket(openSockets, &socketUDP);
+	excludeSocket(openSockets, &socketTCP);
 	freeaddrinfo(addrResultUDP);
 	freeaddrinfo(addrResult);
 	WSACleanup();
